@@ -1,5 +1,6 @@
 import platform
-import sys
+import multiprocessing
+import subprocess
 
 
 def findAllFile(base):
@@ -11,32 +12,16 @@ def findAllFile(base):
     return file_paths
 
 
-def mainFunc(file_paths):
-    files_num = len(file_paths)
-    print('在该文件夹中检测到 {} 个文件\n'.format(files_num))
-    hashs = []
-    duplicate_files = []
-    cnt = 1
-    for file_path in file_paths:
-        # sys.stdout.write('\r正在扫描第{}个文件 {}'.format(cnt,file_path))
-        # sys.stdout.flush()
-        # print('\x1B[1A\x1B[K正在扫描第{}个文件 {}'.format(cnt, file_path), end='\r', flush=True)
-        print('\r正在扫描第{}个文件'.format(cnt), end='', flush=True)
-        hashcode = getHashCode(file_path)
-        if hashcode in hashs:
-            print('\rDuplicate file detected! {}'.format(file_path), end='\n')
-            duplicate_files.append(file_path)
-        else:
-            hashs.append(hashcode)
-        cnt += 1
-
-
 def getHashCode(file_path):
-    # str_hashcode = subprocess.getoutput('certutil -hashfile "{}" sha256'.format(file_path)).split('\n')
-    # SHA-256太慢所以换成MD5
-    str_hashcode = subprocess.getoutput('certutil -hashfile "{}" md5'.format(file_path)).split('\n')
+    str_hashcode = subprocess.getoutput('certutil -hashfile "{}" sha256'.format(file_path)).split('\n')
     hashcode = str_hashcode[1]
     return hashcode
+
+
+def func(file_path, index):
+    print('正在扫描第 {} 个文件'.format(index), end='\r')
+    hashcode = getHashCode(file_path)
+    return [file_path, hashcode]
 
 
 if __name__ == '__main__':
@@ -44,7 +29,6 @@ if __name__ == '__main__':
     current_platform = platform.system()
     if current_platform == 'Windows':
 
-        import subprocess
         import tkinter as tk
         from tkinter import filedialog
         from ctypes import windll
@@ -54,6 +38,39 @@ if __name__ == '__main__':
         root = tk.Tk()
         root.withdraw()
         ddir = filedialog.askdirectory()
-        mainFunc(findAllFile(ddir))
+
+        core_num = multiprocessing.cpu_count()
+        print('检测到该设备有 {} 个CPU核心'.format(core_num))
+        pool = multiprocessing.Pool(processes=core_num)
+
+        files_path = findAllFile(ddir)
+        num_files = len(files_path)
+        file_and_hash_raw = []
+        for i in range(num_files):
+            file_and_hash_raw.append(pool.apply_async(func=func, args=(files_path[i], i)))
+        pool.close()
+        pool.join()
+        file_and_hash = []
+        for x in file_and_hash_raw:
+            file_and_hash.append(x.get())
+
+        sorted_file = {}
+        for i in range(num_files):
+            if file_and_hash[i][1] in sorted_file:
+                sorted_file[file_and_hash[i][1]].append(file_and_hash[i][0])
+
+            else:
+                sorted_file[file_and_hash[i][1]] = [file_and_hash[i][0], ]
+        for key in sorted_file:
+            if len(sorted_file[key]) < 2:
+                continue
+            else:
+                print('以下文件是完全相同的：')
+                for x in sorted_file[key]:
+                    print('\t{}'.format(x), end='\n')
+
+        os.system('pause')
+
+
     else:
-        print('Only available in Windows :(')
+        print('Only available in Windows terminal:(')
